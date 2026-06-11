@@ -377,7 +377,7 @@ static inline uint32_t tb_cflags(const TranslationBlock *tb)
 /* current cflags for hashing/comparison */
 static inline uint32_t curr_cflags(void)
 {
-    return 0;
+    return CF_PARALLEL; /* magiceyes: native-threads share memory -> real host atomics for guest swp/ldrex (LinuxThreads locks) */
 }
 
 /* TranslationBlock invalidate API */
