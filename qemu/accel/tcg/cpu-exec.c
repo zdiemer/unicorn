@@ -581,6 +581,7 @@ int cpu_exec(struct uc_struct *uc, CPUState *cpu)
 #endif /* buggy compiler */
 
         assert_no_pages_locked();
+        mmap_lock_reset();   /* magiceyes: drop a mmap_lock leaked across the unwind */
     }
 
     /* if an exception is pending, we execute it here */

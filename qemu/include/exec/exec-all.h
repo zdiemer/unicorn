@@ -430,8 +430,12 @@ static inline void assert_no_pages_locked(void)
 struct MemoryRegionSection *iotlb_to_section(CPUState *cpu,
                                              hwaddr index, MemTxAttrs attrs);
 
-static inline void mmap_lock(void) {}
-static inline void mmap_unlock(void) {}
+/* magiceyes: real process-global recursive mmap_lock (impl in translate-all.c) --
+   restores qemu's codegen/TB-invalidation serialisation for the native-threads engine. */
+void mmap_lock(void);
+void mmap_unlock(void);
+bool have_mmap_lock(void);
+void mmap_lock_reset(void);
 
 /**
  * get_page_addr_code() - full-system version

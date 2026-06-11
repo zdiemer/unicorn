@@ -36,6 +36,29 @@
 #include "sysemu/tcg.h"
 #include "uc_priv.h"
 
+/* ---- magiceyes: real mmap_lock (was a Unicorn no-op) ----------------------
+ * Multiple ucs translate/invalidate TBs over one shared guest-RAM backing on
+ * parallel host threads; qemu already brackets those paths with mmap_lock(),
+ * so making it a real process-global recursive mutex serialises them and ends
+ * the heap-corruption/double-free at reload teardown. Held only during
+ * codegen/invalidation -> TB execution stays parallel. */
+#include <pthread.h>
+static pthread_mutex_t me_mmap_mutex = PTHREAD_MUTEX_INITIALIZER;
+static __thread int me_mmap_depth;
+void mmap_lock(void)   { if (me_mmap_depth++ == 0) pthread_mutex_lock(&me_mmap_mutex); }
+void mmap_unlock(void) { if (me_mmap_depth > 0 && --me_mmap_depth == 0) pthread_mutex_unlock(&me_mmap_mutex); }
+bool have_mmap_lock(void) { return me_mmap_depth > 0; }
+/* Force-release this thread's mmap_lock after an exception unwind. A guest fault / cpu_loop_exit
+ * can siglongjmp OUT of a codegen/TB-invalidation section that holds mmap_lock, skipping the
+ * matching mmap_unlock -> the mutex stays locked by this thread forever and every other guest
+ * thread that next needs to translate a TB blocks permanently (seen as Rhythmos's video-decoder
+ * threads wedging the whole game). qemu's cpu_exec resets the lock state on the setjmp return for
+ * exactly this; do the same. Safe + idempotent: depth is __thread, so depth>0 means THIS thread
+ * holds the mutex; depth==0 is a no-op. */
+void mmap_lock_reset(void) { if (me_mmap_depth > 0) { me_mmap_depth = 0; pthread_mutex_unlock(&me_mmap_mutex); } }
+/* -------------------------------------------------------------------------- */
+
+
 static bool tb_exec_is_locked(TCGContext*);
 static void tb_exec_change(TCGContext*, bool locked);
 
