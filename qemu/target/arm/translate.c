@@ -11436,6 +11436,30 @@ static void arm_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu)
         dcbase->is_jmp = DISAS_WFI;
     } else {
         dc->pc_curr = dc->base.pc_next;
+        /* magiceyes: kuser_cmpxchg host-atomic. The kuser page's CAS helper lives at 0xffff0fc0
+           (oldval=r0, newval=r1, ptr=r2 -> r0=0 + CPSR.C set on success). Emit it as a real
+           host-atomic compare-exchange in this TB instead of the svc-trap form, so glibc/libstdc++
+           atomic-heavy guest code does not pay an svc + cpu-loop-exit per atomic. */
+        if (dc->base.pc_next == 0xffff0fc0u) {
+            TCGContext *tcg_ctx = dc->uc->tcg_ctx;
+            TCGv_i32 kaddr = load_reg(dc, 2);
+            TCGv_i32 kold  = load_reg(dc, 0);
+            TCGv_i32 knew  = load_reg(dc, 1);
+            TCGv_i32 kmem  = tcg_temp_new_i32(tcg_ctx);
+            tcg_gen_atomic_cmpxchg_i32(tcg_ctx, kmem, kaddr, kold, knew,
+                                       get_mem_index(dc), MO_UL | MO_ALIGN | dc->be_data);
+            /* CPSR C = (*ptr == oldval) ; r0 = (*ptr != oldval) -> 0 on success (the contract) */
+            tcg_gen_setcond_i32(tcg_ctx, TCG_COND_EQ, tcg_ctx->cpu_CF, kmem, kold);
+            tcg_gen_setcond_i32(tcg_ctx, TCG_COND_NE, tcg_ctx->cpu_R[0], kmem, kold);
+            tcg_temp_free_i32(tcg_ctx, kmem);
+            tcg_temp_free_i32(tcg_ctx, knew);
+            tcg_temp_free_i32(tcg_ctx, kold);
+            tcg_temp_free_i32(tcg_ctx, kaddr);
+            store_reg(dc, 15, load_reg(dc, 14));   /* mov pc, lr -- ends the TB (DISAS_JUMP) */
+            dc->base.pc_next += 4;
+            arm_post_translate_insn(dc);
+            return;
+        }
         insn = arm_ldl_code(env, dc->base.pc_next, dc->sctlr_b);
         dc->insn = insn;
 
