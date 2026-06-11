@@ -349,9 +349,15 @@ static inline bool cpu_handle_exception(CPUState *cpu, int *ret)
                 break;
             }
         }
-        if (!catched) {
-            uc->invalid_error = UC_ERR_INSN_INVALID;
+        if (catched) {
+            // magiceyes: resume in place -- the invalid-insn hook (FPA emulation)
+            // handled the instruction and advanced PC; continue executing instead of
+            // stopping (mirrors the UC_HOOK_INTR continue path below), so FP-heavy
+            // guests do not pay a uc_emu_start restart per emulated FP op.
+            cpu->exception_index = -1;
+            return false;
         }
+        uc->invalid_error = UC_ERR_INSN_INVALID;
 
         // we want to stop emulation
         *ret = EXCP_HLT;
