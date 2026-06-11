@@ -128,9 +128,12 @@ void *qemu_anon_ram_alloc(struct uc_struct *uc, size_t size, uint64_t *alignment
 void qemu_vfree(void *ptr)
 {
 #ifdef __MINGW32__
-    if (ptr) {
-        VirtualFree(ptr, 0, MEM_RELEASE);
-    }
+    /* magiceyes: qemu_try_memalign's MinGW branch allocates with __mingw_aligned_malloc
+       (CRT heap), so freeing with VirtualFree was a mismatched-allocator bug: the kernel
+       rounds the address down to its region base, and when that base happens to be a real
+       NT allocation base the call SUCCEEDS and releases a whole heap region -> the
+       Windows-only timing-sensitive heap corruption at uc_close/reload teardown. */
+    __mingw_aligned_free(ptr);
 #else
     //trace_qemu_vfree(ptr);
     free(ptr);
